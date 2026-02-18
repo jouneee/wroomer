@@ -1,0 +1,13 @@
+[package]
+name = "wgpu_zoom"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+bytemuck = {version = "1.25.0", features = ["derive"] }
+image = {version = "0.25.9", default-features = false, features = ["png", "jpeg"] }
+libwayshot = "0.7.2"
+wgpu = "27.0.1"
+winit = "0.30.12"
+pollster = "0.3"
+anyhow = "1.0.101"
