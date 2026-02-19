@@ -172,7 +172,7 @@ impl State {
             width: size.width,
             height: size.height,
             present_mode: wgpu::PresentMode::Fifo,
-            alpha_mode: wgpu::CompositeAlphaMode::PreMultiplied,
+            alpha_mode: wgpu::CompositeAlphaMode::Opaque,
             view_formats: vec![],
             desired_maximum_frame_latency: 2,
         };
@@ -705,61 +705,60 @@ impl ApplicationHandler<State> for App {
 }
 
 pub fn take_screenshot(monitor: Option<String>) -> &'static RgbaImage {
-    {
+    let is_wayland = std::env::var("WAYLAND_DISPLAY").is_ok();
+    
+    if is_wayland {
         let wayshot_connection = Some(WayshotConnection::new()
             .expect("Failed to connect to wayland"));
-        
-        if !wayshot_connection.is_none() {
-            let wayshot_connection = wayshot_connection.unwrap();
-            let outputs = wayshot_connection.get_all_outputs();
-            if outputs.is_empty() {
-                eprintln!("No outputs found.");
-                std::process::exit(1);
-            }
-            
-            let idx = match monitor {
-                None => 0,
-                Some(ref name) => outputs
-                    .iter()
-                    .position(|out| &out.name == name)
-                    .unwrap_or_else(|| {
-                        eprintln!("Output {} was not found.", name);
-                        std::process::exit(1);
-                    })
-            };
-        
-            let sel_mon = &outputs[idx];
-        
-            SCREENSHOT.get_or_init(||
-                wayshot_connection
-                    .screenshot_single_output(sel_mon,false)
-                    .expect("Failed to take a screenshot")
-                    .to_rgba8()
-            )
+        let wayshot_connection = wayshot_connection.unwrap();
+        let outputs = wayshot_connection.get_all_outputs();
+        if outputs.is_empty() {
+            eprintln!("No outputs found.");
+            std::process::exit(1);
         }
-        else {
-            let outputs = Monitor::all().unwrap();
-            if outputs.is_empty() {
-                eprintln!("No outputs found.");
-                std::process::exit(1);
-            };
+        
+        let idx = match monitor {
+            None => 0,
+            Some(ref name) => outputs
+                .iter()
+                .position(|out| &out.name == name)
+                .unwrap_or_else(|| {
+                    eprintln!("Output {} was not found.", name);
+                    std::process::exit(1);
+                })
+        };
     
-            let idx = match monitor {
-                None => 0,
-                Some(ref name) => outputs
-                    .iter()
-                    .position(|out| &out.name().unwrap() == name)
-                    .unwrap_or_else(|| {
-                        eprintln!("Output {} was not found.", name);
-                        std::process::exit(1);
-                    })
-            };
+        let sel_mon = &outputs[idx];
     
-            let sel_mon = &outputs[idx];
-            SCREENSHOT.get_or_init(||
-                sel_mon.capture_image().unwrap()
-            )
-        }
+        SCREENSHOT.get_or_init(||
+            wayshot_connection
+                .screenshot_single_output(sel_mon,false)
+                .expect("Failed to take a screenshot")
+                .to_rgba8()
+        )
+    }
+    else {
+        let outputs = Monitor::all().unwrap();
+        if outputs.is_empty() {
+            eprintln!("No outputs found.");
+            std::process::exit(1);
+        };
+
+        let idx = match monitor {
+            None => 0,
+            Some(ref name) => outputs
+                .iter()
+                .position(|out| &out.name().unwrap() == name)
+                .unwrap_or_else(|| {
+                    eprintln!("Output {} was not found.", name);
+                    std::process::exit(1);
+                })
+        };
+
+        let sel_mon = &outputs[idx];
+        SCREENSHOT.get_or_init(||
+            sel_mon.capture_image().unwrap()
+        )
     }
 }
 
@@ -773,7 +772,7 @@ fn run() -> anyhow::Result<()> {
 
 fn main() {
     let mut args = env::args();
-    let program = args.next().unwrap();
+    let _program = args.next().unwrap();
     let monitor = args.next();
     take_screenshot(monitor);
     let _ = run();
