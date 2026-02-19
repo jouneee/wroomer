@@ -5,6 +5,15 @@ struct CameraUniform {
 @group(1) @binding(0)
 var<uniform> camera: CameraUniform;
 
+struct FlUniform {
+    cur_pos: vec2<f32>,
+    radius: f32,
+    alpha: f32
+};
+@group(2) @binding(0)
+var<uniform> flashlight: FlUniform;
+
+
 struct VertexInput {
     @location(0) position: vec3<f32>,
     @location(1) tex_coords: vec2<f32>,
@@ -35,5 +44,14 @@ var s_diffuse: sampler;
 
 @fragment
 fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
-    return textureSample(t_diffuse, s_diffuse, in.tex_coords);
+    let screen = textureSample(t_diffuse, s_diffuse, in.tex_coords);
+
+    let dist = length(flashlight.cur_pos - in.clip_position.xy);
+    let radius = flashlight.radius * camera.zoom;
+    
+    let is_inside = dist < radius;
+    let mix_factor = select(flashlight.alpha, 0.0, is_inside);
+    
+    let color = mix(screen, vec4<f32>(0.0, 0.0, 0.0, 1.0), mix_factor);
+    return color;
 }

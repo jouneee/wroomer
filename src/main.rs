@@ -1,8 +1,6 @@
 use core::f32;
-use std::sync::Arc;
+use std::{f32::consts::PI, sync::Arc};
 use std::time::Instant;
-use image::RgbaImage;
-use libwayshot::WayshotConnection;
 use wgpu::util::DeviceExt;
 use winit::{
     application::ApplicationHandler, dpi::PhysicalPosition, event::*, event_loop::{
@@ -11,6 +9,10 @@ use winit::{
         KeyCode, PhysicalKey
     }, window::{Fullscreen, Window}
 };
+
+use image::RgbaImage;
+use libwayshot::WayshotConnection;
+
 
 #[repr(C)]
 #[derive(Copy, Clone, Debug, bytemuck::Pod, bytemuck::Zeroable)]
@@ -41,8 +43,7 @@ impl Vertex {
     }
 }
 
-// screen polygon
-const VERTICES: &[Vertex] = &[
+const SCREEN_VERTICES: &[Vertex] = &[
     Vertex { position: [-1.0, 1.0, 0.0], tex_coords: [0.0, 0.0] },
     Vertex { position: [-1.0, -1.0, 0.0],tex_coords: [0.0, 1.0] },
     Vertex { position: [1.0, -1.0, 0.0], tex_coords: [1.0, 1.0] },
@@ -74,6 +75,28 @@ impl CameraUniform {
 }
 
 
+#[repr(C)]
+#[derive(Copy, Clone, Debug, bytemuck::Pod, bytemuck::Zeroable)]
+struct FlUniform {
+    pos: [f32; 2],
+    radius: f32,
+    alpha: f32,
+}
+
+impl FlUniform {
+    fn new() -> Self {
+        Self {
+            pos: [0.0, 0.0],
+            radius: 200.0,
+            alpha: 0.0,
+        }
+    }
+
+    fn update_buffer(&self, _device: &wgpu::Device, queue: &wgpu::Queue, buffer: &wgpu::Buffer) {
+        queue.write_buffer(buffer, 0, bytemuck::cast_slice(&[*self]));
+    }
+}
+
 struct State {
     surface: wgpu::Surface<'static>,
     device: wgpu::Device,
@@ -81,15 +104,18 @@ struct State {
     config: wgpu::SurfaceConfiguration,
     render_pipeline: wgpu::RenderPipeline,
     window: Arc<Window>,
-    vertex_buffer: wgpu::Buffer,
+    screen_vertex_buffer: wgpu::Buffer,
     num_vertices: u32,
     diffuse_bind_group: wgpu::BindGroup,
     is_surface_configured: bool,
-
     camera: CameraUniform,
     camera_buffer: wgpu::Buffer,
     camera_bind_group: wgpu::BindGroup,
+    flashlight: FlUniform,
+    flashlight_buffer: wgpu::Buffer,
+    flashlight_bind_group: wgpu::BindGroup,
     is_mouse_down: bool,
+    enable_flashlight: bool,
     last_mouse_position: [f64; 2],
     normalized_mouse_coords: [f32; 2],
     velocity: [f32; 2],
@@ -148,25 +174,26 @@ impl State {
             desired_maximum_frame_latency: 2,
         };
 
-        let vertex_buffer = device.create_buffer_init(
+        let screen_vertex_buffer = device.create_buffer_init(
             &wgpu::util::BufferInitDescriptor {
                 label: Some("Vertex Buffer"),
-                contents: bytemuck::cast_slice(VERTICES),
+                contents: bytemuck::cast_slice(SCREEN_VERTICES),
                 usage: wgpu::BufferUsages::VERTEX,
             }
         );
 
-        let num_vertices = VERTICES.len() as u32;
+        let num_vertices = SCREEN_VERTICES.len() as u32;
 
         let screenshot = take_screenshot();
 
         let dimensions = screenshot.dimensions();
-
+        
         let texture_size = wgpu::Extent3d {
             width: dimensions.0,
             height: dimensions.1,
             depth_or_array_layers: 1,
         };
+
         let diffuse_texture = device.create_texture(
             &wgpu::TextureDescriptor {
                 size: texture_size,
@@ -179,6 +206,7 @@ impl State {
                 view_formats: &[],
             }
         );
+
         queue.write_texture(
             wgpu::TexelCopyTextureInfo {
                 texture: &diffuse_texture,
@@ -263,7 +291,7 @@ impl State {
                 entries: &[
                     wgpu::BindGroupLayoutEntry {
                         binding: 0,
-                        visibility: wgpu::ShaderStages::VERTEX,
+                        visibility: wgpu::ShaderStages::VERTEX | wgpu::ShaderStages::FRAGMENT,
                         ty: wgpu::BindingType::Buffer {
                             ty: wgpu::BufferBindingType::Uniform,
                             has_dynamic_offset: false,
@@ -289,6 +317,45 @@ impl State {
             }
         );
 
+        let flashlight_buffer = device.create_buffer_init(
+            &wgpu::util::BufferInitDescriptor {
+                label: Some("Fl Buffer"),
+                contents: bytemuck::cast_slice(&[FlUniform::new()]),
+                usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+            }
+        );
+
+        let flashlight_bind_group_layout = device.create_bind_group_layout(
+            &wgpu::BindGroupLayoutDescriptor {
+                entries: &[
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 0,
+                        visibility: wgpu::ShaderStages::FRAGMENT,
+                        ty: wgpu::BindingType::Buffer {
+                            ty: wgpu::BufferBindingType::Uniform,
+                            has_dynamic_offset: false,
+                            min_binding_size: None,
+                        },
+                        count: None,
+                    },
+                ],
+                label: None,
+            }
+        );
+
+        let flashlight_bind_group = device.create_bind_group(
+            &wgpu::BindGroupDescriptor {
+                layout: &flashlight_bind_group_layout,
+                entries: &[
+                    wgpu::BindGroupEntry {
+                        binding: 0,
+                        resource: flashlight_buffer.as_entire_binding(),
+                    },
+                ],
+                label: Some("flashlight_bind_group"),
+            }
+        );
+
         let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("Shader"),
             source: wgpu::ShaderSource::Wgsl(include_str!("shader.wgsl").into()),
@@ -299,7 +366,8 @@ impl State {
                 label: Some("Render Pipeline Layout"),
                 bind_group_layouts: &[
                     &texture_bind_group_layout,
-                    &camera_bind_group_layout
+                    &camera_bind_group_layout,
+                    &flashlight_bind_group_layout,
                 ],
                 push_constant_ranges: &[],
             });
@@ -352,18 +420,20 @@ impl State {
             config,
             render_pipeline,
             window,
-            vertex_buffer,
+            screen_vertex_buffer,
             num_vertices,
             diffuse_bind_group,
             is_surface_configured: false,
-
             camera: CameraUniform::new(),
             camera_buffer,
             camera_bind_group,
+            flashlight: FlUniform::new(),
+            flashlight_buffer,
+            flashlight_bind_group,
             is_mouse_down: false,
+            enable_flashlight: false,
             last_mouse_position: [0.0, 0.0],
             normalized_mouse_coords: [0.0, 0.0],
-
             velocity: [0.0, 0.0],
             delta_scale: 0.0,
             scale_pivot: [0.0, 0.0],
@@ -385,7 +455,7 @@ impl State {
         self.last_frame_time = Instant::now();
         const VELOCITY_THRESHOLD: f32 = 0.0001;
         const DRAG_FRICTION: f32 = 2.0;
-        const MIN_ZOOM: f32 = 0.5;
+        const MIN_ZOOM: f32 = 0.001;
         const MAX_ZOOM: f32 = 10.0;
         const ZOOM_FRICTION: f32 = 8.0;
 
@@ -404,26 +474,44 @@ impl State {
         }
         
         if (self.delta_scale).abs() > 0.001 {
-            let old_zoom = self.camera.zoom;
-            self.camera.zoom += self.delta_scale * frame_time;
-            self.camera.zoom = self.camera.zoom.clamp(MIN_ZOOM, MAX_ZOOM);
-            let new_zoom = self.camera.zoom;
-
-            if (new_zoom - old_zoom).abs() > 0.0 {
-                let f = new_zoom / old_zoom;
-                self.camera.offset[0] = self.camera.offset[0] * f + self.scale_pivot[0] as f32 * (1.0 - f);
-                self.camera.offset[1] = self.camera.offset[1] * f + self.scale_pivot[1] as f32 * (1.0 - f);
+            if self.enable_flashlight {
+                let old_r = self.flashlight.radius;
+                let step = self.delta_scale / self.camera.zoom * frame_time;
+                let new_r = old_r - step;
+                
+                let area_diff = (old_r * old_r - new_r * new_r).abs() * PI;
+                let safe_diff = area_diff.max(0.0001);
+                let log_val = safe_diff.log2();
+                let a = log_val * log_val * log_val * log_val;
+                
+                let change = step * a;
+                self.flashlight.radius = (old_r - change).clamp(10.0, 2000.0);
+                
+                self.delta_scale *= (1.0 - ZOOM_FRICTION * frame_time).max(0.0);
+            } else {
+                let old_zoom = self.camera.zoom;
+                self.camera.zoom += self.delta_scale * frame_time;
+                self.camera.zoom = self.camera.zoom.clamp(MIN_ZOOM, MAX_ZOOM);
+                let new_zoom = self.camera.zoom;
+    
+                if (new_zoom - old_zoom).abs() > 0.0 {
+                    let f = new_zoom / old_zoom;
+                    self.camera.offset[0] = self.camera.offset[0] * f + self.scale_pivot[0] as f32 * (1.0 - f);
+                    self.camera.offset[1] = self.camera.offset[1] * f + self.scale_pivot[1] as f32 * (1.0 - f);
+                }
+    
+                self.delta_scale *= (1.0 - ZOOM_FRICTION * frame_time).max(0.0);
             }
-
-            self.delta_scale *= (1.0 - ZOOM_FRICTION * frame_time).max(0.0);
             if self.delta_scale.abs() < 0.001 {
                 self.delta_scale = 0.0;
             }
         }
         self.camera.update_buffer(&self.device, &self.queue, &self.camera_buffer);
+        self.flashlight.update_buffer(&self.device, &self.queue, &self.flashlight_buffer);
     }
 
     fn handle_cursor_moved(&mut self, position: PhysicalPosition<f64>) {
+        self.flashlight.pos = [position.x as f32, position.y as f32];
         let window_size = self.window.inner_size();
         let frame_time = self.last_frame_time.elapsed().as_secs_f32();
         let frame_time = if frame_time > 0.0 { frame_time } else { 0.01 };
@@ -448,27 +536,30 @@ impl State {
             self.camera.offset[0] += delta_x;
             self.camera.offset[1] += delta_y;
         }
-        
+    
         self.last_mouse_position = [position.x, position.y];
     }
     
     fn handle_mouse_wheel(&mut self, delta: MouseScrollDelta) {
         const ZOOM_SPEED: f32 = 3.0;
-
         let scroll_amount = match delta {
             MouseScrollDelta::LineDelta(_, y) => y as f32,
             MouseScrollDelta::PixelDelta(pos) => pos.y as f32,
         };
         let direction = if scroll_amount > 0.0 { 1.0 } else { -1.0 };
+        
         self.delta_scale = direction * ZOOM_SPEED * self.camera.zoom;
-
         self.scale_pivot = self.normalized_mouse_coords;
     }
 
     fn handle_keyboard_input(&mut self, event_loop: &ActiveEventLoop, code: KeyCode, is_pressed: bool) {
         if code == KeyCode::Escape && is_pressed {
-            event_loop.exit()
-        }
+            event_loop.exit();
+        } else 
+        if code == KeyCode::ShiftLeft {
+            self.enable_flashlight = is_pressed;
+            self.flashlight.alpha = if is_pressed { 0.75 } else { 0.0 };
+        } 
     }
 
     fn handle_mouse_input(&mut self, event_loop: &ActiveEventLoop, button: MouseButton, state: ElementState) {
@@ -520,7 +611,8 @@ impl State {
             render_pass.set_pipeline(&self.render_pipeline);
             render_pass.set_bind_group(0, &self.diffuse_bind_group, &[]);
             render_pass.set_bind_group(1, &self.camera_bind_group, &[]);
-            render_pass.set_vertex_buffer(0, self.vertex_buffer.slice(..));
+            render_pass.set_bind_group(2, &self.flashlight_bind_group, &[]);
+            render_pass.set_vertex_buffer(0, self.screen_vertex_buffer.slice(..));
 
             render_pass.draw(0..self.num_vertices, 0..1);
         }
@@ -611,8 +703,10 @@ impl ApplicationHandler<State> for App {
     }
 }
 
-fn take_screenshot() -> RgbaImage {
-    let wayshot_connection = WayshotConnection::new().expect("Failed to connect to wayshot");
+pub fn take_screenshot() -> RgbaImage {
+    let wayshot_connection = WayshotConnection::new()
+        .expect("Failed to connect to wayshot");
+    
     let outputs = wayshot_connection.get_all_outputs();
     if outputs.is_empty() {
         eprintln!("No Wayland outputs found.");
@@ -622,6 +716,7 @@ fn take_screenshot() -> RgbaImage {
         .screenshot_all(false)
         .expect("Failed to take a screenshot")
         .to_rgba8();
+
     return screenshot
 }
 
