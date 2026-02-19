@@ -12,8 +12,9 @@ use winit::{
 };
 
 use image::RgbaImage;
-use libwayshot::WayshotConnection;
 use xcap::Monitor;
+#[cfg(target_os="linux")]
+use libwayshot::WayshotConnection;
 
 static SCREENSHOT: OnceLock<RgbaImage> = OnceLock::new();
 
@@ -172,7 +173,7 @@ impl State {
             width: size.width,
             height: size.height,
             present_mode: wgpu::PresentMode::Fifo,
-            alpha_mode: wgpu::CompositeAlphaMode::Opaque,
+            alpha_mode: wgpu::CompositeAlphaMode::Auto,
             view_formats: vec![],
             desired_maximum_frame_latency: 2,
         };
@@ -708,34 +709,37 @@ pub fn take_screenshot(monitor: Option<String>) -> &'static RgbaImage {
     let is_wayland = std::env::var("WAYLAND_DISPLAY").is_ok();
     
     if is_wayland {
-        let wayshot_connection = Some(WayshotConnection::new()
-            .expect("Failed to connect to wayland"));
-        let wayshot_connection = wayshot_connection.unwrap();
-        let outputs = wayshot_connection.get_all_outputs();
-        if outputs.is_empty() {
-            eprintln!("No outputs found.");
-            std::process::exit(1);
-        }
+        #[cfg(target_os="linux")]
+        {
+            let wayshot_connection = Some(WayshotConnection::new()
+                .expect("Failed to connect to wayland"));
+            let wayshot_connection = wayshot_connection.unwrap();
+            let outputs = wayshot_connection.get_all_outputs();
+            if outputs.is_empty() {
+                eprintln!("No outputs found.");
+                std::process::exit(1);
+            }
+            
+            let idx = match monitor {
+                None => 0,
+                Some(ref name) => outputs
+                    .iter()
+                    .position(|out| &out.name == name)
+                    .unwrap_or_else(|| {
+                        eprintln!("Output {} was not found.", name);
+                        std::process::exit(1);
+                    })
+            };
         
-        let idx = match monitor {
-            None => 0,
-            Some(ref name) => outputs
-                .iter()
-                .position(|out| &out.name == name)
-                .unwrap_or_else(|| {
-                    eprintln!("Output {} was not found.", name);
-                    std::process::exit(1);
-                })
-        };
-    
-        let sel_mon = &outputs[idx];
-    
-        SCREENSHOT.get_or_init(||
-            wayshot_connection
-                .screenshot_single_output(sel_mon,false)
-                .expect("Failed to take a screenshot")
-                .to_rgba8()
-        )
+            let sel_mon = &outputs[idx];
+        
+            SCREENSHOT.get_or_init(||
+                wayshot_connection
+                    .screenshot_single_output(sel_mon,false)
+                    .expect("Failed to take a screenshot")
+                    .to_rgba8()
+            )
+        }
     }
     else {
         let outputs = Monitor::all().unwrap();
