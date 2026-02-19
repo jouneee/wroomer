@@ -705,7 +705,7 @@ impl ApplicationHandler<State> for App {
     }
 }
 
-pub fn take_screenshot(monitor: Option<String>) -> &'static RgbaImage {
+pub fn take_screenshot(monitor: Option<String>) {
     let is_wayland = std::env::var("WAYLAND_DISPLAY").is_ok();
     
     if is_wayland {
@@ -738,7 +738,7 @@ pub fn take_screenshot(monitor: Option<String>) -> &'static RgbaImage {
                     .screenshot_single_output(sel_mon,false)
                     .expect("Failed to take a screenshot")
                     .to_rgba8()
-            )
+            );
         }
     }
     else {
@@ -762,7 +762,7 @@ pub fn take_screenshot(monitor: Option<String>) -> &'static RgbaImage {
         let sel_mon = &outputs[idx];
         SCREENSHOT.get_or_init(||
             sel_mon.capture_image().unwrap()
-        )
+        );
     }
 }
 
