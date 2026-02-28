@@ -515,9 +515,7 @@ impl State {
     fn handle_cursor_moved(&mut self, position: PhysicalPosition<f64>) {
         self.flashlight.pos = [position.x as f32, position.y as f32];
         let window_size = self.window.inner_size();
-        let frame_time = self.last_frame_time.elapsed().as_secs_f32();
-        let frame_time = if frame_time > 0.0 { frame_time } else { 0.01 };
-    
+
         self.normalized_mouse_coords[0] = position.x as f32 / (window_size.width as f32 * 0.5) - 1.0;
         self.normalized_mouse_coords[1] = 1.0 - (position.y as f32 / (window_size.height as f32 * 0.5));
         let last_normalized_mouse_coords_x = self.last_mouse_position[0] as f32 / (window_size.width as f32 * 0.5) - 1.0;
@@ -529,8 +527,8 @@ impl State {
 
             let travel_x = (position.x - self.last_mouse_position[0]).abs() as f32;
             let travel_y = (position.y - self.last_mouse_position[1]).abs() as f32;
-            let speed_x = travel_x / frame_time * 0.5;
-            let speed_y = travel_y / frame_time * 0.5;
+            let speed_x = travel_x * 144.0 / 2.0;
+            let speed_y = travel_y * 144.0 / 2.0;
 
             self.velocity[0] = delta_x * speed_x;
             self.velocity[1] = delta_y * speed_y;
