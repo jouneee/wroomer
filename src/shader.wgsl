@@ -48,10 +48,10 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
 
     let dist = length(flashlight.cur_pos - in.clip_position.xy);
     let radius = flashlight.radius * camera.zoom;
-    
+
     let is_inside = dist < radius;
     let mix_factor = select(flashlight.alpha, 0.0, is_inside);
-    
+
     let color = mix(screen, vec4<f32>(0.0, 0.0, 0.0, 1.0), mix_factor);
     return color;
 }

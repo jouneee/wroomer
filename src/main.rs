@@ -1,4 +1,5 @@
 use core::f32;
+use libwayshot::{LogicalRegion, OutputInfo};
 use std::sync::OnceLock;
 use std::time::Instant;
 use std::{env, f32::consts::PI, sync::Arc};
@@ -94,6 +95,28 @@ impl CameraUniform {
 
     fn update_buffer(&self, _device: &wgpu::Device, queue: &wgpu::Queue, buffer: &wgpu::Buffer) {
         queue.write_buffer(buffer, 0, bytemuck::cast_slice(&[*self]));
+    }
+
+    fn fit_camera(
+        window_width: u32,
+        window_height: u32,
+        desktop_width: u32,
+        desktop_height: u32,
+    ) -> CameraUniform {
+        let aspect_window: f32 = (window_width / window_height) as f32;
+        let aspect_desktop: f32 = (desktop_width / desktop_height) as f32;
+
+        let zoom = if aspect_desktop > aspect_window {
+            (window_width / desktop_width) as f32
+        } else {
+            (window_height / desktop_height) as f32
+        };
+
+        CameraUniform {
+            zoom,
+            _padding: 0.0,
+            offset: [0.0, 0.0],
+        }
     }
 }
 
@@ -288,9 +311,11 @@ impl State {
             label: Some("diffuse_bind_group"),
         });
 
+        let camera = CameraUniform::fit_camera(size.width, size.height, dimensions.0, dimensions.1);
+
         let camera_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("Camera Buffer"),
-            contents: bytemuck::cast_slice(&[CameraUniform::new()]),
+            contents: bytemuck::cast_slice(&[camera]),
             usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
         });
 
@@ -413,7 +438,7 @@ impl State {
             num_vertices,
             diffuse_bind_group,
             is_surface_configured: false,
-            camera: CameraUniform::new(),
+            camera: camera,
             camera_buffer,
             camera_bind_group,
             flashlight: FlUniform::new(),
@@ -718,27 +743,28 @@ pub fn take_screenshot(monitor: Option<String>) {
                 std::process::exit(1);
             }
 
-            for out in outputs {
-                let region = out.logical_region;
-                println!("{}", region)
-            }
+            // let idx = match monitor {
+            //     None => 0,
+            //     Some(ref name) => outputs
+            //         .iter()
+            //         .position(|out| &out.name == name)
+            //         .unwrap_or_else(|| {
+            //             eprintln!("Output {} was not found.", name);
+            //             std::process::exit(1);
+            //         }),
+            // };
 
-            let idx = match monitor {
-                None => 0,
-                Some(ref name) => outputs
-                    .iter()
-                    .position(|out| &out.name == name)
-                    .unwrap_or_else(|| {
-                        eprintln!("Output {} was not found.", name);
-                        std::process::exit(1);
-                    }),
-            };
+            // let sel_mon = &outputs[idx];
 
-            let sel_mon = &outputs[idx];
-
+            // SCREENSHOT.get_or_init(|| {
+            //     wayshot_connection
+            //         .screenshot_single_output(sel_mon, false)
+            //         .expect("Failed to take a screenshot")
+            //         .to_rgba8()
+            // });
             SCREENSHOT.get_or_init(|| {
                 wayshot_connection
-                    .screenshot_single_output(sel_mon, false)
+                    .screenshot_all(false)
                     .expect("Failed to take a screenshot")
                     .to_rgba8()
             });
