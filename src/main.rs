@@ -1,20 +1,21 @@
 use core::f32;
 use std::sync::OnceLock;
-use std::{f32::consts::PI, sync::Arc, env};
 use std::time::Instant;
+use std::{env, f32::consts::PI, sync::Arc};
 use wgpu::util::DeviceExt;
 use winit::{
-    application::ApplicationHandler, dpi::PhysicalPosition, event::*, event_loop::{
-        ActiveEventLoop, EventLoop
-    }, keyboard::{
-        KeyCode, PhysicalKey
-    }, window::{Fullscreen, Window}
+    application::ApplicationHandler,
+    dpi::PhysicalPosition,
+    event::*,
+    event_loop::{ActiveEventLoop, EventLoop},
+    keyboard::{KeyCode, PhysicalKey},
+    window::{Fullscreen, Window},
 };
 
 use image::RgbaImage;
-use xcap::Monitor;
-#[cfg(target_os="linux")]
+#[cfg(target_os = "linux")]
 use libwayshot::WayshotConnection;
+use xcap::Monitor;
 
 static SCREENSHOT: OnceLock<RgbaImage> = OnceLock::new();
 
@@ -42,18 +43,36 @@ impl Vertex {
                     shader_location: 1,
                     format: wgpu::VertexFormat::Float32x2,
                 },
-            ]
+            ],
         }
     }
 }
 
 const SCREEN_VERTICES: &[Vertex] = &[
-    Vertex { position: [-1.0, 1.0, 0.0], tex_coords: [0.0, 0.0] },
-    Vertex { position: [-1.0, -1.0, 0.0],tex_coords: [0.0, 1.0] },
-    Vertex { position: [1.0, -1.0, 0.0], tex_coords: [1.0, 1.0] },
-    Vertex { position: [-1.0, 1.0, 0.0], tex_coords: [0.0, 0.0] },
-    Vertex { position: [1.0, -1.0, 0.0], tex_coords: [1.0, 1.0] },
-    Vertex { position: [1.0, 1.0, 0.0],  tex_coords: [1.0, 0.0] },
+    Vertex {
+        position: [-1.0, 1.0, 0.0],
+        tex_coords: [0.0, 0.0],
+    },
+    Vertex {
+        position: [-1.0, -1.0, 0.0],
+        tex_coords: [0.0, 1.0],
+    },
+    Vertex {
+        position: [1.0, -1.0, 0.0],
+        tex_coords: [1.0, 1.0],
+    },
+    Vertex {
+        position: [-1.0, 1.0, 0.0],
+        tex_coords: [0.0, 0.0],
+    },
+    Vertex {
+        position: [1.0, -1.0, 0.0],
+        tex_coords: [1.0, 1.0],
+    },
+    Vertex {
+        position: [1.0, 1.0, 0.0],
+        tex_coords: [1.0, 0.0],
+    },
 ];
 
 #[repr(C)]
@@ -72,12 +91,11 @@ impl CameraUniform {
             offset: [0.0, 0.0],
         }
     }
-    
+
     fn update_buffer(&self, _device: &wgpu::Device, queue: &wgpu::Queue, buffer: &wgpu::Buffer) {
         queue.write_buffer(buffer, 0, bytemuck::cast_slice(&[*self]));
     }
 }
-
 
 #[repr(C)]
 #[derive(Copy, Clone, Debug, bytemuck::Pod, bytemuck::Zeroable)]
@@ -104,7 +122,7 @@ impl FlUniform {
 struct State {
     surface: wgpu::Surface<'static>,
     device: wgpu::Device,
-    queue: wgpu:: Queue,
+    queue: wgpu::Queue,
     config: wgpu::SurfaceConfiguration,
     render_pipeline: wgpu::RenderPipeline,
     window: Arc<Window>,
@@ -132,36 +150,35 @@ impl State {
     async fn new(window: Arc<Window>) -> anyhow::Result<Self> {
         let size = window.inner_size();
 
-        let instance = wgpu::Instance::new(
-            &wgpu::InstanceDescriptor {
-                backends: wgpu::Backends::PRIMARY,
-                ..Default::default()
-            }
-        );
+        let instance = wgpu::Instance::new(&wgpu::InstanceDescriptor {
+            backends: wgpu::Backends::PRIMARY,
+            ..Default::default()
+        });
 
         let surface = instance.create_surface(window.clone()).unwrap();
 
-        let adapter = instance.request_adapter(
-            &wgpu::RequestAdapterOptions {
+        let adapter = instance
+            .request_adapter(&wgpu::RequestAdapterOptions {
                 power_preference: wgpu::PowerPreference::default(),
                 compatible_surface: Some(&surface),
                 force_fallback_adapter: false,
-            }
-        ).await?;
+            })
+            .await?;
 
-        let (device, queue) = adapter.request_device(
-            &wgpu::DeviceDescriptor {
+        let (device, queue) = adapter
+            .request_device(&wgpu::DeviceDescriptor {
                 label: None,
                 required_features: wgpu::Features::empty(),
                 experimental_features: wgpu::ExperimentalFeatures::disabled(),
                 required_limits: wgpu::Limits::default(),
                 memory_hints: Default::default(),
                 trace: wgpu::Trace::Off,
-            }
-        ).await?;
+            })
+            .await?;
 
         let surface_caps = surface.get_capabilities(&adapter);
-        let surface_format = surface_caps.formats
+        let surface_format = surface_caps
+            .formats
             .iter()
             .find(|f| f.is_srgb())
             .copied()
@@ -178,36 +195,32 @@ impl State {
             desired_maximum_frame_latency: 2,
         };
 
-        let screen_vertex_buffer = device.create_buffer_init(
-            &wgpu::util::BufferInitDescriptor {
-                label: Some("Vertex Buffer"),
-                contents: bytemuck::cast_slice(SCREEN_VERTICES),
-                usage: wgpu::BufferUsages::VERTEX,
-            }
-        );
+        let screen_vertex_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("Vertex Buffer"),
+            contents: bytemuck::cast_slice(SCREEN_VERTICES),
+            usage: wgpu::BufferUsages::VERTEX,
+        });
 
         let num_vertices = SCREEN_VERTICES.len() as u32;
 
         let dimensions = SCREENSHOT.get().unwrap().dimensions();
-        
+
         let texture_size = wgpu::Extent3d {
             width: dimensions.0,
             height: dimensions.1,
             depth_or_array_layers: 1,
         };
 
-        let diffuse_texture = device.create_texture(
-            &wgpu::TextureDescriptor {
-                size: texture_size,
-                mip_level_count: 1,
-                sample_count: 1,
-                dimension: wgpu::TextureDimension::D2,
-                format: wgpu::TextureFormat::Rgba8UnormSrgb,
-                usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
-                label: Some("Diffuse Texture"),
-                view_formats: &[],
-            }
-        );
+        let diffuse_texture = device.create_texture(&wgpu::TextureDescriptor {
+            size: texture_size,
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: wgpu::TextureFormat::Rgba8UnormSrgb,
+            usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+            label: Some("Diffuse Texture"),
+            view_formats: &[],
+        });
 
         queue.write_texture(
             wgpu::TexelCopyTextureInfo {
@@ -215,30 +228,27 @@ impl State {
                 mip_level: 0,
                 origin: wgpu::Origin3d::ZERO,
                 aspect: wgpu::TextureAspect::All,
-            }, 
-            &SCREENSHOT.get().unwrap(), 
+            },
+            &SCREENSHOT.get().unwrap(),
             wgpu::TexelCopyBufferLayout {
                 offset: 0,
                 bytes_per_row: Some(4 * dimensions.0),
                 rows_per_image: Some(dimensions.1),
-            }, 
+            },
             texture_size,
         );
 
-        let diffuse_texture_view = diffuse_texture.create_view(
-            &wgpu::TextureViewDescriptor::default(),
-        );
-        let diffuse_sampler = device.create_sampler(
-            &wgpu::SamplerDescriptor {
-                address_mode_u: wgpu::AddressMode::ClampToEdge,
-                address_mode_v: wgpu::AddressMode::ClampToEdge,
-                address_mode_w: wgpu::AddressMode::ClampToEdge,
-                mag_filter: wgpu::FilterMode::Nearest,
-                min_filter: wgpu::FilterMode::Nearest,
-                mipmap_filter: wgpu::FilterMode::Nearest,
-                ..Default::default()
-            }
-        );
+        let diffuse_texture_view =
+            diffuse_texture.create_view(&wgpu::TextureViewDescriptor::default());
+        let diffuse_sampler = device.create_sampler(&wgpu::SamplerDescriptor {
+            address_mode_u: wgpu::AddressMode::ClampToEdge,
+            address_mode_v: wgpu::AddressMode::ClampToEdge,
+            address_mode_w: wgpu::AddressMode::ClampToEdge,
+            mag_filter: wgpu::FilterMode::Nearest,
+            min_filter: wgpu::FilterMode::Nearest,
+            mipmap_filter: wgpu::FilterMode::Nearest,
+            ..Default::default()
+        });
 
         let texture_bind_group_layout =
             device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
@@ -263,106 +273,86 @@ impl State {
                 label: Some("texture_bind_group_layout"),
             });
 
-        let diffuse_bind_group = device.create_bind_group(
-        &wgpu::BindGroupDescriptor {
-                layout: &texture_bind_group_layout,
-                entries: &[
-                    wgpu::BindGroupEntry {
-                        binding: 0,
-                        resource: wgpu::BindingResource::TextureView(&diffuse_texture_view),
-                    },
-                    wgpu::BindGroupEntry {
-                        binding: 1,
-                        resource: wgpu::BindingResource::Sampler(&diffuse_sampler),
-                    }
-                ],
-                label: Some("diffuse_bind_group"),
-            }
-        );
+        let diffuse_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            layout: &texture_bind_group_layout,
+            entries: &[
+                wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: wgpu::BindingResource::TextureView(&diffuse_texture_view),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 1,
+                    resource: wgpu::BindingResource::Sampler(&diffuse_sampler),
+                },
+            ],
+            label: Some("diffuse_bind_group"),
+        });
 
-        let camera_buffer = device.create_buffer_init(
-            &wgpu::util::BufferInitDescriptor {
-                label: Some("Camera Buffer"),
-                contents: bytemuck::cast_slice(&[CameraUniform::new()]),
-                usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
-            }
-        );
+        let camera_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("Camera Buffer"),
+            contents: bytemuck::cast_slice(&[CameraUniform::new()]),
+            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+        });
 
-        let camera_bind_group_layout = device.create_bind_group_layout(
-            &wgpu::BindGroupLayoutDescriptor {
-                entries: &[
-                    wgpu::BindGroupLayoutEntry {
-                        binding: 0,
-                        visibility: wgpu::ShaderStages::VERTEX | wgpu::ShaderStages::FRAGMENT,
-                        ty: wgpu::BindingType::Buffer {
-                            ty: wgpu::BufferBindingType::Uniform,
-                            has_dynamic_offset: false,
-                            min_binding_size: None,
-                        },
-                        count: None,
+        let camera_bind_group_layout =
+            device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+                entries: &[wgpu::BindGroupLayoutEntry {
+                    binding: 0,
+                    visibility: wgpu::ShaderStages::VERTEX | wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Uniform,
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
                     },
-                ],
+                    count: None,
+                }],
                 label: Some("camera_bind_group_layout"),
-            }
-        );
+            });
 
-        let camera_bind_group = device.create_bind_group(
-            &wgpu::BindGroupDescriptor {
-                layout: &camera_bind_group_layout,
-                entries: &[
-                    wgpu::BindGroupEntry {
-                        binding: 0,
-                        resource: camera_buffer.as_entire_binding(),
+        let camera_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            layout: &camera_bind_group_layout,
+            entries: &[wgpu::BindGroupEntry {
+                binding: 0,
+                resource: camera_buffer.as_entire_binding(),
+            }],
+            label: Some("camera_bind_group"),
+        });
+
+        let flashlight_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("Fl Buffer"),
+            contents: bytemuck::cast_slice(&[FlUniform::new()]),
+            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+        });
+
+        let flashlight_bind_group_layout =
+            device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+                entries: &[wgpu::BindGroupLayoutEntry {
+                    binding: 0,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Uniform,
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
                     },
-                ],
-                label: Some("camera_bind_group"),
-            }
-        );
-
-        let flashlight_buffer = device.create_buffer_init(
-            &wgpu::util::BufferInitDescriptor {
-                label: Some("Fl Buffer"),
-                contents: bytemuck::cast_slice(&[FlUniform::new()]),
-                usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
-            }
-        );
-
-        let flashlight_bind_group_layout = device.create_bind_group_layout(
-            &wgpu::BindGroupLayoutDescriptor {
-                entries: &[
-                    wgpu::BindGroupLayoutEntry {
-                        binding: 0,
-                        visibility: wgpu::ShaderStages::FRAGMENT,
-                        ty: wgpu::BindingType::Buffer {
-                            ty: wgpu::BufferBindingType::Uniform,
-                            has_dynamic_offset: false,
-                            min_binding_size: None,
-                        },
-                        count: None,
-                    },
-                ],
+                    count: None,
+                }],
                 label: None,
-            }
-        );
+            });
 
-        let flashlight_bind_group = device.create_bind_group(
-            &wgpu::BindGroupDescriptor {
-                layout: &flashlight_bind_group_layout,
-                entries: &[
-                    wgpu::BindGroupEntry {
-                        binding: 0,
-                        resource: flashlight_buffer.as_entire_binding(),
-                    },
-                ],
-                label: Some("flashlight_bind_group"),
-            }
-        );
+        let flashlight_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            layout: &flashlight_bind_group_layout,
+            entries: &[wgpu::BindGroupEntry {
+                binding: 0,
+                resource: flashlight_buffer.as_entire_binding(),
+            }],
+            label: Some("flashlight_bind_group"),
+        });
 
         let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("Shader"),
             source: wgpu::ShaderSource::Wgsl(include_str!("shader.wgsl").into()),
         });
-        
+
         let render_pipeline_layout =
             device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
                 label: Some("Render Pipeline Layout"),
@@ -380,9 +370,7 @@ impl State {
             vertex: wgpu::VertexState {
                 module: &shader,
                 entry_point: Some("vs_main"),
-                buffers: &[
-                    Vertex::desc(),
-                ],
+                buffers: &[Vertex::desc()],
                 compilation_options: wgpu::PipelineCompilationOptions::default(),
             },
             fragment: Some(wgpu::FragmentState {
@@ -413,7 +401,6 @@ impl State {
             multiview: None,
             cache: None,
         });
-
 
         Ok(Self {
             surface,
@@ -466,60 +453,68 @@ impl State {
         } else {
             if self.velocity[0].abs() > VELOCITY_THRESHOLD {
                 self.camera.offset[0] += self.velocity[0] * frame_time;
-                self.velocity[0]      -= self.velocity[0] * DRAG_FRICTION * frame_time;
+                self.velocity[0] -= self.velocity[0] * DRAG_FRICTION * frame_time;
             }
-            
+
             if self.velocity[1].abs() > VELOCITY_THRESHOLD {
                 self.camera.offset[1] += self.velocity[1] * frame_time;
-                self.velocity[1]      -= self.velocity[1] * DRAG_FRICTION * frame_time;
+                self.velocity[1] -= self.velocity[1] * DRAG_FRICTION * frame_time;
             }
         }
-        
+
         if (self.delta_scale).abs() > 0.001 {
             if self.enable_flashlight {
                 let old_r = self.flashlight.radius;
                 let step = self.delta_scale / self.camera.zoom * frame_time;
                 let new_r = old_r - step;
-                
+
                 let area_diff = (old_r * old_r - new_r * new_r).abs() * PI;
                 let safe_diff = area_diff.max(0.0001);
                 let log_val = safe_diff.log2();
                 let a = log_val * log_val * log_val * log_val;
-                
+
                 let change = step * a;
                 self.flashlight.radius = (old_r - change).clamp(10.0, 2000.0);
-                
+
                 self.delta_scale *= (1.0 - ZOOM_FRICTION * frame_time).max(0.0);
             } else {
                 let old_zoom = self.camera.zoom;
                 self.camera.zoom += self.delta_scale * frame_time;
                 self.camera.zoom = self.camera.zoom.clamp(MIN_ZOOM, MAX_ZOOM);
                 let new_zoom = self.camera.zoom;
-    
+
                 if (new_zoom - old_zoom).abs() > 0.0 {
                     let f = new_zoom / old_zoom;
-                    self.camera.offset[0] = self.camera.offset[0] * f + self.scale_pivot[0] as f32 * (1.0 - f);
-                    self.camera.offset[1] = self.camera.offset[1] * f + self.scale_pivot[1] as f32 * (1.0 - f);
+                    self.camera.offset[0] =
+                        self.camera.offset[0] * f + self.scale_pivot[0] as f32 * (1.0 - f);
+                    self.camera.offset[1] =
+                        self.camera.offset[1] * f + self.scale_pivot[1] as f32 * (1.0 - f);
                 }
-    
+
                 self.delta_scale *= (1.0 - ZOOM_FRICTION * frame_time).max(0.0);
             }
             if self.delta_scale.abs() < 0.001 {
                 self.delta_scale = 0.0;
             }
         }
-        self.camera.update_buffer(&self.device, &self.queue, &self.camera_buffer);
-        self.flashlight.update_buffer(&self.device, &self.queue, &self.flashlight_buffer);
+        self.camera
+            .update_buffer(&self.device, &self.queue, &self.camera_buffer);
+        self.flashlight
+            .update_buffer(&self.device, &self.queue, &self.flashlight_buffer);
     }
 
     fn handle_cursor_moved(&mut self, position: PhysicalPosition<f64>) {
         self.flashlight.pos = [position.x as f32, position.y as f32];
         let window_size = self.window.inner_size();
 
-        self.normalized_mouse_coords[0] = position.x as f32 / (window_size.width as f32 * 0.5) - 1.0;
-        self.normalized_mouse_coords[1] = 1.0 - (position.y as f32 / (window_size.height as f32 * 0.5));
-        let last_normalized_mouse_coords_x = self.last_mouse_position[0] as f32 / (window_size.width as f32 * 0.5) - 1.0;
-        let last_normalized_mouse_coords_y = 1.0 - (self.last_mouse_position[1] as f32 / (window_size.height as f32 * 0.5));
+        self.normalized_mouse_coords[0] =
+            position.x as f32 / (window_size.width as f32 * 0.5) - 1.0;
+        self.normalized_mouse_coords[1] =
+            1.0 - (position.y as f32 / (window_size.height as f32 * 0.5));
+        let last_normalized_mouse_coords_x =
+            self.last_mouse_position[0] as f32 / (window_size.width as f32 * 0.5) - 1.0;
+        let last_normalized_mouse_coords_y =
+            1.0 - (self.last_mouse_position[1] as f32 / (window_size.height as f32 * 0.5));
 
         if self.is_mouse_down {
             let delta_x = (self.normalized_mouse_coords[0] - last_normalized_mouse_coords_x) as f32;
@@ -536,10 +531,10 @@ impl State {
             self.camera.offset[0] += delta_x;
             self.camera.offset[1] += delta_y;
         }
-    
+
         self.last_mouse_position = [position.x, position.y];
     }
-    
+
     fn handle_mouse_wheel(&mut self, delta: MouseScrollDelta) {
         const ZOOM_SPEED: f32 = 3.0;
         let scroll_amount = match delta {
@@ -547,26 +542,34 @@ impl State {
             MouseScrollDelta::PixelDelta(pos) => pos.y as f32,
         };
         let direction = if scroll_amount > 0.0 { 1.0 } else { -1.0 };
-        
+
         self.delta_scale = direction * ZOOM_SPEED * self.camera.zoom;
         self.scale_pivot = self.normalized_mouse_coords;
     }
 
-    fn handle_keyboard_input(&mut self, event_loop: &ActiveEventLoop, code: KeyCode, is_pressed: bool) {
+    fn handle_keyboard_input(
+        &mut self,
+        event_loop: &ActiveEventLoop,
+        code: KeyCode,
+        is_pressed: bool,
+    ) {
         if code == KeyCode::Escape && is_pressed {
             event_loop.exit();
-        } else 
-        if code == KeyCode::ShiftLeft {
+        } else if code == KeyCode::ShiftLeft {
             self.enable_flashlight = is_pressed;
             self.flashlight.alpha = if is_pressed { 0.75 } else { 0.0 };
-        } 
+        }
     }
 
-    fn handle_mouse_input(&mut self, event_loop: &ActiveEventLoop, button: MouseButton, state: ElementState) {
+    fn handle_mouse_input(
+        &mut self,
+        event_loop: &ActiveEventLoop,
+        button: MouseButton,
+        state: ElementState,
+    ) {
         if button == MouseButton::Left {
             self.is_mouse_down = state == ElementState::Pressed;
-        } else 
-        if button == MouseButton::Right {
+        } else if button == MouseButton::Right {
             event_loop.exit()
         }
     }
@@ -579,34 +582,35 @@ impl State {
         }
 
         let output = self.surface.get_current_texture()?;
-        let view = output.texture.create_view(&wgpu::TextureViewDescriptor::default());
-        let mut encoder = self.device.create_command_encoder(
-            &wgpu::CommandEncoderDescriptor {
-                label: Some("Render Encoder")
+        let view = output
+            .texture
+            .create_view(&wgpu::TextureViewDescriptor::default());
+        let mut encoder = self
+            .device
+            .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                label: Some("Render Encoder"),
             });
         {
-            let mut render_pass = encoder.begin_render_pass(
-                &wgpu::RenderPassDescriptor {
-                    label: Some("Render Pass"),
-                    color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                        view: &view,
-                        resolve_target: None,
-                        depth_slice: None,
-                        ops: wgpu::Operations {
-                            load: wgpu::LoadOp::Clear(wgpu::Color {
-                                r: 0.0,
-                                g: 0.0,
-                                b: 0.0,
-                                a: 0.25,
-                            }),
-                            store: wgpu::StoreOp::Store,
-                        },
-                    })],
-                    depth_stencil_attachment: None,
-                    occlusion_query_set: None,
-                    timestamp_writes: None,
-                }
-            );
+            let mut render_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                label: Some("Render Pass"),
+                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                    view: &view,
+                    resolve_target: None,
+                    depth_slice: None,
+                    ops: wgpu::Operations {
+                        load: wgpu::LoadOp::Clear(wgpu::Color {
+                            r: 0.0,
+                            g: 0.0,
+                            b: 0.0,
+                            a: 0.25,
+                        }),
+                        store: wgpu::StoreOp::Store,
+                    },
+                })],
+                depth_stencil_attachment: None,
+                occlusion_query_set: None,
+                timestamp_writes: None,
+            });
 
             render_pass.set_pipeline(&self.render_pipeline);
             render_pass.set_bind_group(0, &self.diffuse_bind_group, &[]);
@@ -630,9 +634,7 @@ pub struct App {
 
 impl App {
     pub fn new() -> Self {
-        Self {
-            state: None,
-        }
+        Self { state: None }
     }
 }
 
@@ -640,7 +642,9 @@ impl ApplicationHandler<State> for App {
     fn resumed(&mut self, event_loop: &ActiveEventLoop) {
         #[allow(unused_mut)]
         let fullscreen = Some(Fullscreen::Borderless(None));
-        let window_attributes = Window::default_attributes().with_transparent(true).with_fullscreen(fullscreen);
+        let window_attributes = Window::default_attributes()
+            .with_transparent(true)
+            .with_fullscreen(fullscreen);
         let window = Arc::new(event_loop.create_window(window_attributes).unwrap());
 
         self.state = Some(pollster::block_on(State::new(window)).unwrap());
@@ -652,11 +656,11 @@ impl ApplicationHandler<State> for App {
     }
 
     fn window_event(
-        &mut self, 
-        event_loop: &ActiveEventLoop, 
-        _window_id: winit::window::WindowId, 
-        event: WindowEvent) 
-    {
+        &mut self,
+        event_loop: &ActiveEventLoop,
+        _window_id: winit::window::WindowId,
+        event: WindowEvent,
+    ) {
         let state = match &mut self.state {
             Some(canvas) => canvas,
             None => return,
@@ -665,26 +669,22 @@ impl ApplicationHandler<State> for App {
         match event {
             WindowEvent::CloseRequested => event_loop.exit(),
             WindowEvent::Resized(size) => state.resize(size.width, size.height),
-            WindowEvent::KeyboardInput { 
-                event: KeyEvent {
-                    physical_key: PhysicalKey::Code(code),
-                    state: key_state,
-                    ..
-                },
+            WindowEvent::KeyboardInput {
+                event:
+                    KeyEvent {
+                        physical_key: PhysicalKey::Code(code),
+                        state: key_state,
+                        ..
+                    },
                 ..
             } => state.handle_keyboard_input(event_loop, code, key_state.is_pressed()),
-            WindowEvent::MouseInput { 
-                button, 
-                state: mouse_state, .. 
+            WindowEvent::MouseInput {
+                button,
+                state: mouse_state,
+                ..
             } => state.handle_mouse_input(event_loop, button, mouse_state),
-            WindowEvent::CursorMoved { 
-                position, 
-                .. 
-            } => state.handle_cursor_moved(position),
-            WindowEvent::MouseWheel { 
-                delta, 
-                .. 
-            } => state.handle_mouse_wheel(delta),
+            WindowEvent::CursorMoved { position, .. } => state.handle_cursor_moved(position),
+            WindowEvent::MouseWheel { delta, .. } => state.handle_mouse_wheel(delta),
             WindowEvent::RedrawRequested => {
                 state.update();
                 match state.render() {
@@ -697,7 +697,7 @@ impl ApplicationHandler<State> for App {
                         eprintln!("Unable to render {}", e);
                     }
                 }
-            },
+            }
             _ => {}
         }
     }
@@ -705,19 +705,24 @@ impl ApplicationHandler<State> for App {
 
 pub fn take_screenshot(monitor: Option<String>) {
     let is_wayland = std::env::var("WAYLAND_DISPLAY").is_ok();
-    
+
     if is_wayland {
-        #[cfg(target_os="linux")]
+        #[cfg(target_os = "linux")]
         {
-            let wayshot_connection = Some(WayshotConnection::new()
-                .expect("Failed to connect to wayland"));
+            let wayshot_connection =
+                Some(WayshotConnection::new().expect("Failed to connect to wayland"));
             let wayshot_connection = wayshot_connection.unwrap();
             let outputs = wayshot_connection.get_all_outputs();
             if outputs.is_empty() {
                 eprintln!("No outputs found.");
                 std::process::exit(1);
             }
-            
+
+            for out in outputs {
+                let region = out.logical_region;
+                println!("{}", region)
+            }
+
             let idx = match monitor {
                 None => 0,
                 Some(ref name) => outputs
@@ -726,20 +731,19 @@ pub fn take_screenshot(monitor: Option<String>) {
                     .unwrap_or_else(|| {
                         eprintln!("Output {} was not found.", name);
                         std::process::exit(1);
-                    })
+                    }),
             };
-        
+
             let sel_mon = &outputs[idx];
-        
-            SCREENSHOT.get_or_init(||
+
+            SCREENSHOT.get_or_init(|| {
                 wayshot_connection
-                    .screenshot_single_output(sel_mon,false)
+                    .screenshot_single_output(sel_mon, false)
                     .expect("Failed to take a screenshot")
                     .to_rgba8()
-            );
+            });
         }
-    }
-    else {
+    } else {
         let outputs = Monitor::all().unwrap();
         if outputs.is_empty() {
             eprintln!("No outputs found.");
@@ -754,13 +758,11 @@ pub fn take_screenshot(monitor: Option<String>) {
                 .unwrap_or_else(|| {
                     eprintln!("Output {} was not found.", name);
                     std::process::exit(1);
-                })
+                }),
         };
 
         let sel_mon = &outputs[idx];
-        SCREENSHOT.get_or_init(||
-            sel_mon.capture_image().unwrap()
-        );
+        SCREENSHOT.get_or_init(|| sel_mon.capture_image().unwrap());
     }
 }
 
